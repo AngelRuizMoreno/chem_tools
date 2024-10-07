@@ -66,10 +66,7 @@ def align_ligands(target, reference):
             out = Chem.SDWriter(aligned_tmp.name)
             out.write(tar)
             out.close()
-            
-            # Load the aligned target molecule back into PyMOL
-            cmd.load(aligned_tmp.name, format="sdf", object='aligned_target')
-        
+    
     # Print alignment information
     print(f"RMSD: {rmsd}")
     print(f"MCS (SMARTS): {mcs.smartsString}")
