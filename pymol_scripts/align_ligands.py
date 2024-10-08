@@ -4,8 +4,12 @@ from rdkit import Chem
 from rdkit.Chem import rdMolAlign, rdFMCS
 import tempfile
 
-def align_ligands(target, reference):
-    '''
+def __init__(self):
+	self.menuBar.addcascademenu('Plugin','AlignLigands','AlignLigands',label = 'AlignLigands')
+	self.menuBar.addmenuitem('AlignLigands', 'command','Help',label = 'Usage',command = lambda s=self : Help())
+
+def Help():
+    Usage='''
     Aligns two small molecules (ligands) within PyMOL based on maximum common substructure (MCS) alignment.
 
     Parameters:
@@ -39,6 +43,10 @@ def align_ligands(target, reference):
         The script will print the RMSD, the SMARTS pattern of the MCS, and the number of atoms involved 
         in the alignment after execution.
     '''
+    print(Usage)
+    return
+
+def align_ligands(target, reference):
     
     # Create temporary files for the reference and target molecules
     with tempfile.NamedTemporaryFile(suffix=".sdf", delete=False) as ref_tmp, \
