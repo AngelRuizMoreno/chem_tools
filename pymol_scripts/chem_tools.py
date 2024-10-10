@@ -1,6 +1,6 @@
 # Import necessary libraries from PyMOL and RDKit
-from pymol import cmd
-import os, tempfile, subprocess
+from pymol import cmd, stored
+import os, tempfile, subprocess, shutil
 from rdkit import Chem
 from rdkit.Chem import rdMolAlign, rdFMCS
 
@@ -10,6 +10,8 @@ def __init__(self):
     self.menuBar.addmenuitem('ChemTools', 'command', 'align_with_rdkit_help', label='Align with RDKit Help', command=lambda: align_with_rdkit_Help())
     self.menuBar.addmenuitem('ChemTools', 'command', 'align_with_fkcombu_help', label='Align with FKcombu Help', command=lambda: align_with_fkcombu_Help())
     self.menuBar.addmenuitem('ChemTools', 'command', 'docking_with_smina_help', label='Docking with Smina Help', command=lambda: docking_with_smina_Help())
+    self.menuBar.addmenuitem('ChemTools', 'command', 'pockets_with_fpocket_help', label='Pockets with Fpocket Help', command=lambda: pockets_with_fpocket_Help())
+
 
 def align_with_rdkit_Help():
     Usage="""
@@ -84,6 +86,35 @@ def docking_with_smina_Help():
 
     Returns:
     - None
+    """
+    print(Usage)
+    return
+
+def pockets_with_fpocket_Help():
+    Usage="""
+    Identifies pockets on a protein surface using fpocket and displays them in PyMOL.
+
+    Parameters:
+    - receptor (str): Name of the receptor object in PyMOL.
+
+    Returns:
+    - None
+
+    Description:
+    This function uses fpocket to identify pockets on the surface of a protein loaded in PyMOL. It saves the
+    receptor structure as a temporary PDB file, runs fpocket on this file, and loads the identified pockets back
+    into PyMOL as separate objects. Pockets are then displayed as semi-transparent colored spheres, with each
+    pocket numbered sequentially.
+    
+    Requirements:
+    - PyMOL
+    - fpocket (accessible from the command line)
+    
+    Usage Example:
+        pockets_with_fpocket receptor_name
+
+    The function will print fpocket’s output to the console and display each identified pocket as a separate
+    PyMOL object with a unique color.
     """
     print(Usage)
     return
@@ -228,10 +259,79 @@ def docking_with_smina(receptor: str, ligand: str, center_x: float, center_y: fl
             print(f"An error occurred while running smina: {e}")
             print("Standard output:", e.stdout)
             print("Standard error:", e.stderr)
+    
+
+def pockets_with_fpocket(receptor: str):
+    # Create a temporary file for the receptor PDB
+    with tempfile.NamedTemporaryFile(suffix=".pdb", delete=False) as receptor_tmp:
+        # Save the receptor from PyMOL to a temporary PDB file
+        cmd.save(receptor_tmp.name, receptor, format="pdb")
+        
+        # Prepare the fpocket command
+        command = ["fpocket", "-f", receptor_tmp.name]
+        
+        try:
+            # Run the fpocket command
+            result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            # Output the results to the console
+            print("Fpocket output:")
+            print(result.stdout)
+            
+            if result.stderr:
+                print("Fpocket errors:")
+                print(result.stderr)
+                
+            # Construct paths for the fpocket output directory and files
+            pocket_output_dir = receptor_tmp.name.replace(".pdb", "_out")
+            pocket_pdb_file = os.path.join(pocket_output_dir, os.path.basename(receptor_tmp.name).replace(".pdb", "_out.pdb"))
+            info_file = os.path.join(pocket_output_dir, os.path.basename(receptor_tmp.name).replace(".pdb", "_info.txt"))
+
+            # Load the fpocket output PDB file into PyMOL
+            if os.path.exists(pocket_pdb_file):
+                cmd.load(pocket_pdb_file,format="pdb",object="pockets_found")
+                print("Pockets loaded")
+
+                # Display fpocket info file content
+                if os.path.exists(info_file):
+                    with open(info_file) as pocket_data:
+                        print(pocket_data.read())
+                else:
+                    print("Warning: Info file not found.")
+            else:
+                print("Error: Pocket PDB file not found.")
+        
+        except subprocess.CalledProcessError as e:
+            print(f"An error occurred while running fpocket: {e}")
+            print("Fpocket output:", e.stdout)
+            print("Fpocket error:", e.stderr)
+            return
+        
+        # Selecting and displaying pockets
+        stored.list = []
+        cmd.iterate("(resn STP)", "stored.list.append(resi)")
+        lastSTP = stored.list[-1] if stored.list else None
+        
+        if lastSTP:
+            for my_index in range(1, int(lastSTP) + 1):
+                pocket_selection = f"pocket{my_index}"
+                cmd.select(pocket_selection, f"resn STP and resi {my_index}")
+                cmd.color(my_index+1, pocket_selection)
+                cmd.show("spheres", pocket_selection)
+                cmd.set("sphere_scale", 1, pocket_selection)
+                cmd.set("sphere_transparency", 0.4, pocket_selection)
+        cmd.remove("pockets_found and polymer")
+        
+        # Clean up temporary and output files
+        os.remove(receptor_tmp.name)
+        # Remove the output directory and its contents
+        if os.path.exists(pocket_output_dir):
+            shutil.rmtree(pocket_output_dir)
+
 
 # Extend PyMOL's command set to include this function
 cmd.extend("align_with_rdkit",align_with_rdkit)
 cmd.extend("align_with_fkcombu", align_with_fkcombu)
 cmd.extend("docking_with_smina", docking_with_smina)
-# Instantiate the plugin class
-ChemToolsPlugin()
+cmd.extend("pockets_with_fpocket", pockets_with_fpocket)
+
