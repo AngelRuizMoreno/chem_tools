@@ -1,8 +1,10 @@
 # Import necessary libraries from PyMOL and RDKit
 from pymol import cmd, stored
 import os, tempfile, subprocess, shutil
+from pdbfixer import PDBFixer
+from openmm.app import PDBFile
 from rdkit import Chem
-from rdkit.Chem import rdMolAlign, rdFMCS
+from rdkit.Chem import rdMolAlign, rdFMCS, Descriptors, Descriptors3D
 
 def __init__(self):
     
@@ -119,6 +121,41 @@ def pockets_with_fpocket_Help():
     print(Usage)
     return
     
+
+def describe_molecule(molecule:str):
+    
+    descriptors_list=['MolWt','TPSA','FractionCSP3', 'HeavyAtomCount', 'NHOHCount', 'NOCount', 'NumAliphaticCarbocycles',
+                      'NumAliphaticHeterocycles', 'NumAliphaticRings', 'NumAromaticCarbocycles', 'NumAromaticHeterocycles', 
+                      'NumAromaticRings', 'NumHAcceptors', 'NumHDonors', 'NumHeteroatoms', 'NumRotatableBonds', 'NumSaturatedCarbocycles',
+                      'NumSaturatedHeterocycles', 'NumSaturatedRings','RingCount', 'MolLogP', 'MolMR']
+    
+    # Create temporary files for the reference and target molecules
+    with tempfile.NamedTemporaryFile(suffix=".sdf", delete=False) as mol_tmp:
+        
+        # Save reference and target molecules to temporary .sdf files
+        cmd.save(mol_tmp.name, format="sdf", selection=molecule, state=-1)
+        
+        # Read the molecules from the .sdf files using RDKit
+        mol = Chem.SDMolSupplier(mol_tmp.name)[0]
+
+    def _get_descriptors(mol):
+        details={"SMILES": Chem.MolToSmiles(mol),
+                "SMARTS":Chem.MolToSmarts(mol)}
+        descriptors=Descriptors.CalcMolDescriptors(mol)
+        descriptors_slice={k:v for k,v in descriptors.items() if k in descriptors_list}
+        descriptors3D=Descriptors3D.CalcMolDescriptors3D(mol)
+        mol_descriptors = {**details,**descriptors_slice, **descriptors3D}
+        return mol_descriptors
+    
+    data=_get_descriptors(mol)
+    os.remove(mol_tmp.name)
+    
+    for k,v in data.items():
+        print(f"{k}: {v}")
+    
+    return data
+
+
 def align_with_rdkit(reference:str,target:str):
     
     # Create temporary files for the reference and target molecules
@@ -259,7 +296,47 @@ def docking_with_smina(receptor: str, ligand: str, center_x: float, center_y: fl
             print(f"An error occurred while running smina: {e}")
             print("Standard output:", e.stdout)
             print("Standard error:", e.stderr)
+
+def cleanup_with_pdbfixer(receptor: str, removeHeterogens: str = "False", pH: float = 7.5):
+    """
+    Cleans up a receptor molecule by adding missing atoms, hydrogens, and optionally removing heterogens.
     
+    Parameters:
+        receptor (str): Name of the receptor object in PyMOL.
+        removeHeterogens (int): Option to remove heteroatoms; 1 for True, 0 for False. Default is 1.
+        ph (float): pH value for adding hydrogens. Default is 7.5.
+    
+    Returns:
+        None
+    """  
+    # Create temporary files for the input and output PDB files
+    with tempfile.NamedTemporaryFile(suffix=".pdb", delete=False) as receptor_tmp, \
+         tempfile.NamedTemporaryFile(suffix=".pdb", delete=False) as fixed_tmp:
+        
+        # Save the receptor from PyMOL to a temporary PDB file
+        cmd.save(receptor_tmp.name, receptor, format="pdb")
+        fixer = PDBFixer(filename=receptor_tmp.name)
+        
+        # Perform cleanup steps
+        fixer.findMissingResidues()
+        fixer.findNonstandardResidues()
+        fixer.replaceNonstandardResidues()
+        fixer.removeHeterogens(eval(removeHeterogens))
+        fixer.findMissingAtoms()
+        fixer.addMissingAtoms()
+        fixer.addMissingHydrogens(float(pH))
+        
+        # Write the fixed structure to a new temporary PDB file
+        with open(fixed_tmp.name, 'w') as output_file:
+            PDBFile.writeFile(fixer.topology, fixer.positions, output_file)
+        
+        # Load the cleaned-up structure into PyMOL
+        cmd.load(fixed_tmp.name, object="fixed_protein")
+        print("Fixed protein loaded as 'fixed_protein'")
+    
+    # Clean up temporary files
+    os.remove(receptor_tmp.name)
+    os.remove(fixed_tmp.name)
 
 def pockets_with_fpocket(receptor: str):
     # Create a temporary file for the receptor PDB
@@ -334,4 +411,5 @@ cmd.extend("align_with_rdkit",align_with_rdkit)
 cmd.extend("align_with_fkcombu", align_with_fkcombu)
 cmd.extend("docking_with_smina", docking_with_smina)
 cmd.extend("pockets_with_fpocket", pockets_with_fpocket)
-
+cmd.extend("describe_molecule", describe_molecule)
+cmd.extend("cleanup_with_pdbfixer",cleanup_with_pdbfixer)
